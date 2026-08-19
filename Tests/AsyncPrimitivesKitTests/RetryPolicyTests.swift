@@ -12,53 +12,67 @@ struct DummyError: Error, Equatable {
     let code: Int
 }
 
+actor Counter {
+    private(set) var value = 0
+
+    @discardableResult
+    func increment() -> Int {
+        value += 1
+        return value
+    }
+}
+
 final class RetryPolicyTests: XCTestCase {
 
     // MARK: - Успех с первой попытки
 
     func test_succeedsOnFirstAttempt_doesNotRetry() async throws {
-        var callCount = 0
+        let counter = Counter()
         let sleeper = TestSleeper()
 
         let result = try await withRetry(
             policy: .constant(maxAttempts: 3, delay: 1.0),
             sleeper: sleeper
         ) {
-            callCount += 1
+            await counter.increment()
             return "success"
         }
 
         XCTAssertEqual(result, "success")
+        let callCount = await counter.value
         XCTAssertEqual(callCount, 1, "Операция должна выполниться только один раз")
-        XCTAssertTrue(sleeper.recordedDelays.isEmpty, "Не должно быть задержек, если сразу успех")
+        let delays = await sleeper.recordedDelays
+        XCTAssertTrue(delays.isEmpty, "Не должно быть задержек, если сразу успех")
     }
 
     // MARK: - Успех после нескольких неудач
 
     func test_succeedsAfterFailures_retriesCorrectNumberOfTimes() async throws {
-        var callCount = 0
+        let counter = Counter()
         let sleeper = TestSleeper()
 
         let result = try await withRetry(
             policy: .constant(maxAttempts: 5, delay: 1.0),
             sleeper: sleeper
         ) {
-            callCount += 1
-            if callCount < 3 {
+            let count = await counter.increment()
+            if count < 3 {
                 throw DummyError(code: 500)
             }
             return "recovered"
         }
 
         XCTAssertEqual(result, "recovered")
+        let callCount = await counter.value
         XCTAssertEqual(callCount, 3, "Должно быть 2 неудачи + 1 успешная попытка")
-        XCTAssertEqual(sleeper.recordedDelays.count, 2, "Задержка должна быть только между попытками, не после успеха")
+        let delays = await sleeper.recordedDelays
+        XCTAssertEqual(delays.count, 2, "Задержка должна быть только между попытками, не после успеха")
     }
 
     // MARK: - Исчерпание всех попыток
 
     func test_allAttemptsFail_throwsRetryExhaustedError() async {
-        var callCount = 0
+        let counter = Counter()
         let sleeper = TestSleeper()
 
         do {
@@ -66,7 +80,7 @@ final class RetryPolicyTests: XCTestCase {
                 policy: .constant(maxAttempts: 3, delay: 1.0),
                 sleeper: sleeper
             ) {
-                callCount += 1
+                await counter.increment()
                 throw DummyError(code: 503)
             } as String
 
@@ -78,14 +92,16 @@ final class RetryPolicyTests: XCTestCase {
             XCTFail("Неверный тип ошибки: \(error)")
         }
 
+        let callCount = await counter.value
         XCTAssertEqual(callCount, 3, "Должно быть ровно maxAttempts попыток")
-        XCTAssertEqual(sleeper.recordedDelays.count, 2, "Задержка между попытками, но не после последней неудачи")
+        let delays = await sleeper.recordedDelays
+        XCTAssertEqual(delays.count, 2)
     }
 
     // MARK: - shouldRetry: false прерывает сразу
 
     func test_shouldRetryReturnsFalse_stopsImmediately() async {
-        var callCount = 0
+        let counter = Counter()
         let sleeper = TestSleeper()
 
         let policy = RetryPolicy(
@@ -99,7 +115,7 @@ final class RetryPolicyTests: XCTestCase {
 
         do {
             _ = try await withRetry(policy: policy, sleeper: sleeper) {
-                callCount += 1
+                await counter.increment()
                 throw DummyError(code: 400)
             } as String
 
@@ -110,14 +126,16 @@ final class RetryPolicyTests: XCTestCase {
             XCTFail("Неверный тип ошибки: \(error)")
         }
 
+        let callCount = await counter.value
         XCTAssertEqual(callCount, 1, "Не должно быть повторных попыток для неретраибельной ошибки")
-        XCTAssertTrue(sleeper.recordedDelays.isEmpty)
+        let delays = await sleeper.recordedDelays
+        XCTAssertTrue(delays.isEmpty)
     }
 
     // MARK: - Отмена Task прерывает retry
 
     func test_taskCancellation_stopsRetryingImmediately() async throws {
-        var callCount = 0
+        let counter = Counter()
         let sleeper = TestSleeper()
 
         let task = Task {
@@ -125,7 +143,7 @@ final class RetryPolicyTests: XCTestCase {
                 policy: .constant(maxAttempts: 10, delay: 1.0),
                 sleeper: sleeper
             ) { () -> String in
-                callCount += 1
+                await counter.increment()
                 throw DummyError(code: 500)
             }
         }
@@ -146,7 +164,7 @@ final class RetryPolicyTests: XCTestCase {
     // MARK: - Проверка расчёта exponential backoff
 
     func test_exponentialBackoff_delaysGrowCorrectly() async throws {
-        var callCount = 0
+        let counter = Counter()
         let sleeper = TestSleeper()
 
         let policy = RetryPolicy(
@@ -155,12 +173,13 @@ final class RetryPolicyTests: XCTestCase {
         )
 
         _ = try? await withRetry(policy: policy, sleeper: sleeper) { () -> String in
-            callCount += 1
+            await counter.increment()
             throw DummyError(code: 500)
         }
 
         // Ожидаем задержки: 1.0, 2.0, 4.0 (перед попытками 2, 3, 4)
-        XCTAssertEqual(sleeper.recordedDelays, [1.0, 2.0, 4.0])
+        let delays = await sleeper.recordedDelays
+        XCTAssertEqual(delays, [1.0, 2.0, 4.0])
     }
 
     // MARK: - Проверка linear backoff
@@ -178,6 +197,7 @@ final class RetryPolicyTests: XCTestCase {
         }
 
         // Ожидаем: 0.5, 1.0, 1.5
-        XCTAssertEqual(sleeper.recordedDelays, [0.5, 1.0, 1.5])
+        let delays = await sleeper.recordedDelays
+        XCTAssertEqual(delays, [0.5, 1.0, 1.5])
     }
 }
