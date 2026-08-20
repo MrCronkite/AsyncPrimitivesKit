@@ -54,6 +54,25 @@ let result = try await withRetry(policy: policy) {
 }
 ```
 
+### AsyncDebouncer
+
+Delays execution until a pause in calls — the last call within `interval` wins, all earlier ones are cancelled and never run.
+
+```swift
+let searchDebouncer = AsyncDebouncer<String>(interval: 0.3)
+
+func onSearchTextChanged(_ text: String) {
+    Task {
+        await searchDebouncer.call(text) { query in
+            let results = try? await searchAPI.search(query)
+            await MainActor.run { self.results = results ?? [] }
+        }
+    }
+}
+```
+
+Only the last call within the debounce window executes — useful for search-as-you-type, form validation, or any rapid-fire UI event you don't want to react to on every keystroke.
+
 Backoff strategies:
 - `.constant(_:)` — fixed delay between attempts
 - `.linear(base:)` — delay grows linearly

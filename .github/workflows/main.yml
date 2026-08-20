@@ -7,44 +7,27 @@ on:
     branches: [ main ]
 
 jobs:
-  # Быстрый прогон — компиляция и тесты под macOS (host platform)
   test-macos:
     name: Test (macOS, swift test)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v7
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
-
-      - name: Swift version
-        run: swift --version
-
       - name: Build
         run: swift build -v
-
       - name: Run tests
         run: swift test -v
 
-  # Полный прогон — сборка и тесты под iOS Simulator,
-  # чтобы подтвердить совместимость с платформой из Package.swift
   test-ios:
     name: Test (iOS Simulator)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v7
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
-
-      - name: List available simulators
-        run: xcrun simctl list devices available
-
       - name: Build and test on iOS Simulator
         run: |
           xcodebuild test \
             -scheme AsyncPrimitivesKit \
-            -destination "platform=iOS Simulator,name=iPhone 15,OS=latest" \
-            -skipMacroValidation \
-            | xcpretty && exit ${PIPESTATUS[0]}
-        continue-on-error: false
+            -destination "platform=iOS Simulator,name=iPhone 15,OS=latest"
