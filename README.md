@@ -71,6 +71,27 @@ func onSearchTextChanged(_ text: String) {
 }
 ```
 
+### AsyncSemaphore
+
+Limits how many operations run concurrently — the rest wait their turn without blocking a thread.
+
+```swift
+let semaphore = AsyncSemaphore(limit: 4)
+
+try await withThrowingTaskGroup(of: Void.self) { group in
+    for url in imageURLs {
+        group.addTask {
+            try await semaphore.withPermit {
+                try await downloadImage(url)
+            }
+        }
+    }
+    try await group.waitForAll()
+}
+```
+
+`withPermit` automatically releases the slot even if the operation throws — use it instead of manual `acquire`/`release` to avoid leaking permits.
+
 Only the last call within the debounce window executes — useful for search-as-you-type, form validation, or any rapid-fire UI event you don't want to react to on every keystroke.
 
 Backoff strategies:
